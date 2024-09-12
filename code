@@ -1,0 +1,271 @@
+import pandas as pd
+
+dataset = pd.read_csv("dataset_.csv")
+
+dataset.drop(columns=['product_price'], inplace=True)
+dataset.isnull().sum()
+# Drop rows with missing values in the 'Review' column
+dataset.dropna(subset=['Review'], inplace=True)
+
+# Reset the index after dropping rows
+dataset.reset_index(drop=True, inplace=True)
+
+import pandas as pd
+
+dataset['Summary'].fillna('No summary available', inplace=True)
+
+print(dataset.isnull().sum())
+
+sentiment_mapping = {'positive': 2, 'negative': 1, 'neutral': 0}
+
+dataset['Sentiment'] = dataset['Sentiment'].replace(sentiment_mapping)
+
+dataset.head(5)
+##
+import nltk
+nltk.download('stopwords')
+nltk.download('averaged_perceptron_tagger')
+nltk.download('wordnet')
+nltk.download('omw-1.4')
+from nltk.corpus import wordnet
+
+def get_wordnet_pos(pos_tag):
+    if pos_tag.startswith('J'):
+        return wordnet.ADJ
+    elif pos_tag.startswith('V'):
+        return wordnet.VERB
+    elif pos_tag.startswith('N'):
+        return wordnet.NOUN
+    elif pos_tag.startswith('R'):
+        return wordnet.ADV
+    else:
+        return wordnet.NOUN
+
+import string
+
+from nltk import pos_tag
+from nltk.corpus import stopwords
+from nltk.tokenize import WhitespaceTokenizer
+from nltk.stem import WordNetLemmatizer
+
+def clean_text(text):
+    # lower text
+    text = text.lower()
+    # tokenize text and remove puncutation
+    text = [word.strip(string.punctuation) for word in text.split(" ")]
+    # remove words that contain numbers
+    text = [word for word in text if not any(c.isdigit() for c in word)]
+    # remove stop words
+    stop = stopwords.words('english')
+    text = [x for x in text if x not in stop]
+    # remove empty spaces tokens
+    text = [t for t in text if len(t) > 0]
+    # pos tag text
+    pos_tags = pos_tag(text)
+    # lemmatize text
+    text = [WordNetLemmatizer().lemmatize(t[0], get_wordnet_pos(t[1])) for t in pos_tags]
+    # remove words with only one letter
+    text = [t for t in text if len(t) > 1]
+    # join all
+    text = " ".join(text)
+    return(text)
+
+# clean text data
+dataset["review_clean"] = dataset["Summary"].apply(lambda x: clean_text(x))
+
+##navie bayers
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+X_train, X_test, y_train, y_test = train_test_split(dataset['review_clean'], dataset['Sentiment'], test_size=0.2, random_state=42)
+
+# Create a Bag-of-Words representation
+vectorizer = CountVectorizer(max_features=500, stop_words=None, ngram_range=(1, 3))
+X_train_bow = vectorizer.fit_transform(X_train)
+X_test_bow = vectorizer.transform(X_test)
+
+# Train a Naive Bayes classifier
+naive_bayes = MultinomialNB(alpha=5.0, fit_prior=True)
+naive_bayes.fit(X_train_bow, y_train)
+
+# Make predictions
+predictions = naive_bayes.predict(X_test_bow)
+
+# Evaluate the model
+accuracy = accuracy_score(y_test, predictions)
+print(f'Accuracy: {accuracy:.2f}')
+
+
+from sklearn.metrics import confusion_matrix
+
+# Compute confusion matrix
+cm = confusion_matrix(y_test, predictions)
+print(cm)
+from sklearn.metrics import classification_report
+report = classification_report(y_test, predictions)
+print(report)
+
+## lstm
+import pandas as pd
+import numpy as np
+from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
+from keras.models import Sequential
+from keras.layers import LSTM, Embedding, Dense, SpatialDropout1D
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+X = dataset['Review_clean'].values
+Y = dataset['Sentiment'].values
+
+# Tokenize the text data
+
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(X)
+X_seq = tokenizer.texts_to_sequences(X)
+
+# Pad sequences to ensure uniform length
+max_length = max([len(x) for x in X_seq])
+X_pad = pad_sequences(X_seq, maxlen=max_length, padding='post')
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X_pad, Y, test_size=0.2, random_state=42)
+
+# Build the LSTM model
+model = Sequential()
+model.add(Embedding(input_dim=len(tokenizer.word_index)+1, output_dim=128, input_length=max_length))
+model.add(SpatialDropout1D(0.4))
+model.add(LSTM(100, dropout=0.2, recurrent_dropout=0.2))
+# model.add(LSTM(100))
+model.add(Dense(3, activation='softmax'))
+model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+# Train the model
+model.fit(X_train, y_train, epochs=10, batch_size=64, validation_data=(X_test, y_test))
+# Predict probabilities on the test set
+y_prob = model.predict(X_test)
+
+# Convert probabilities to class labels
+y_pred = np.argmax(y_prob, axis=1)
+accuracy = accuracy_score(y_test, y_pred)
+print("Accuracy:", accuracy)
+
+from sklearn.metrics import confusion_matrix
+
+# Compute confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+print(cm)
+from sklearn.metrics import classification_report
+report = classification_report(y_test, y_pred)
+print(report)
+
+
+### bert
+!pip install transformers
+import torch
+from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
+from transformers import BertTokenizer, BertForSequenceClassification, AdamW, get_linear_schedule_with_warmup
+from sklearn.metrics import accuracy_score
+
+# Load the pre-trained BERT tokenizer and model
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=3)
+
+# Convert X_train and X_test to PyTorch tensors
+X_train_tensor = torch.tensor(X_train)
+X_test_tensor = torch.tensor(X_test)
+# Convert y_train to PyTorch tensor
+y_train_tensor = torch.tensor(y_train)
+
+# Create DataLoader for training and validation data
+batch_size = 8
+train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+train_sampler = RandomSampler(train_dataset)
+train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size)
+
+
+# Convert y_test to PyTorch tensor
+y_test_tensor = torch.tensor(y_test)
+
+# Create DataLoader for testing data
+test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
+
+test_sampler = SequentialSampler(test_dataset)
+test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=batch_size)
+
+import torch.optim as optim
+# Set up optimizer and scheduler
+optimizer = optim.AdamW(model.parameters(), lr=1e-5, eps=1e-8)
+
+epochs = 10
+scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=len(train_dataloader)*epochs)
+
+# Training loop
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+for epoch in range(epochs):
+    model.train()
+    for batch in train_dataloader:
+        batch = tuple(t.to(device) for t in batch)
+        inputs = {'input_ids': batch[0],
+                  'labels': batch[1]}
+        outputs = model(**inputs)
+        loss = outputs.loss
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        scheduler.step()
+        optimizer.zero_grad()
+
+
+# Validation loop
+model.eval()
+predictions, true_labels = [], []
+for batch in test_dataloader:
+    batch = tuple(t.to(device) for t in batch)
+    inputs = {'input_ids': batch[0],
+              'labels': batch[1]}
+    with torch.no_grad():
+        outputs = model(**inputs)
+    logits = outputs.logits
+    logits = logits.detach().cpu().numpy()
+    predictions.extend(np.argmax(logits, axis=1))
+    true_labels.extend(inputs['labels'].cpu().numpy())
+
+# Calculate accuracy
+accuracy = accuracy_score(true_labels, predictions)
+print("Accuracy:", accuracy)
+
+
+### 
+
+import pandas as pd
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import nltk
+nltk.download('vader_lexicon')
+
+analyzer = SentimentIntensityAnalyzer()
+
+# Function to get sentiment value and compound score
+def getSentiment(comment):
+    vs = analyzer.polarity_scores(comment)
+    compound = vs['compound']
+    if compound >= 0.5:
+        sentiment = 5
+    elif compound < 0.5 and compound >= 0.1:
+        sentiment = 4
+    elif compound < 0.1 and compound >= 0.05:
+        sentiment = 3
+    elif compound < 0.05 and compound > -0.05:
+        sentiment = 2
+    else:
+        sentiment = 1
+    return sentiment
+
+# Apply the function to create 'ratings' column
+dataset['ratings'] = dataset['Review'].apply(getSentiment)
+
+# Print the updated DataFrame
+dataset.head(5)
