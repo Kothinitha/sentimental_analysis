@@ -1,0 +1,98 @@
+!pip install gradio numpy pandas keras scikit-learn
+!pip install gradio
+
+!pip install gradio
+import gradio as gr
+!pip install vaderSentiment
+import nltk
+nltk.download('vader_lexicon')
+import gradio as gr
+import pandas as pd
+import torch
+from transformers import BertTokenizer, BertForSequenceClassification
+import matplotlib.pyplot as plt
+from io import BytesIO
+from nltk.sentiment import SentimentIntensityAnalyzer
+
+# Initialize BERT components
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=3)
+
+# Initialize VADER SentimentIntensityAnalyzer
+analyzer = SentimentIntensityAnalyzer()
+
+# Function to get sentiment value and compound score using VADER
+def getSentiment(comment):
+    vs = analyzer.polarity_scores(comment)
+    compound = vs['compound']
+    if compound >= 0.5:
+        sentiment = 5
+    elif compound < 0.5 and compound >= 0.1:
+        sentiment = 4
+    elif compound < 0.1 and compound >= 0.05:
+        sentiment = 3
+    elif compound < 0.05 and compound > -0.05:
+        sentiment = 2
+    else:
+        sentiment = 1
+    return sentiment, compound
+
+# Function to preprocess CSV file and get VADER sentiment value and compound score
+def preprocess_csv(csv_file):
+    df = pd.read_csv(csv_file.name)
+    df['VADER Sentiment'] = df['text'].apply(lambda x: getSentiment(x)[0])
+    df['Compound'] = df['text'].apply(lambda x: getSentiment(x)[1])
+    return df
+
+# Function to predict sentiment using BERT model and calculate polarity rating using VADER
+def predict_sentiment(csv_file):
+    # Preprocess the CSV file
+    df = preprocess_csv(csv_file)
+    # Convert the text data to BERT input format
+    inputs = tokenizer(df['text'].tolist(), padding=True, truncation=True, return_tensors='pt')
+    # Make predictions using the BERT model
+    outputs = model(**inputs)
+    logits = outputs.logits
+    predictions = torch.argmax(logits, dim=1)
+
+    # Map BERT predictions to sentiment labels
+    sentiment_labels = {0: 'Negative', 1: 'Neutral', 2: 'Positive'}
+    df['BERT Sentiment'] = predictions.tolist()
+    df['Sentiment'] = df['BERT Sentiment'].map(sentiment_labels)
+
+    # Calculate ratings distribution
+    ratings = df["VADER Sentiment"]
+    total_reviews = len(ratings)
+    rating_counts = ratings.value_counts().sort_index()
+    all_ratings = range(1, 6)
+    rating_percentages = rating_counts.reindex(all_ratings, fill_value=0) / total_reviews * 100
+
+    # Prepare pie chart for ratings distribution
+    fig, ax = plt.subplots()
+    ax.pie(rating_percentages, labels=rating_percentages.index.map(str), autopct='%1.1f%%', startangle=90)
+    ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle
+    plt.title("VADER Ratings Distribution")
+    plt.tight_layout()
+
+    # Save the pie chart to a BytesIO object
+    pie_chart = BytesIO()
+    plt.savefig(pie_chart, format='png')
+    pie_chart.seek(0)
+    plt.close(fig)
+
+    return df[['text', 'Sentiment', 'VADER Sentiment']], pie_chart
+
+# Create a Gradio interface
+interface = gr.Interface(
+    fn=predict_sentiment,
+    inputs=gr.File(label="Upload a CSV file containing reviews"),
+    outputs=[
+        gr.Dataframe(headers=["Review", "Sentiment", "Rating"]),
+        gr.Image(label="Ratings Pie Chart")
+    ],
+    title="Sentiment Analysis & Ratings",
+    description="Upload a CSV file containing reviews to get sentiment labels and ratings for each review, along with a pie chart showing ratings distribution."
+)
+
+# Launch the Gradio interface
+interface.launch()
